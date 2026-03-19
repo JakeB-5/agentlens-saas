@@ -1,0 +1,133 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+model Project {
+  id        String   @id @default(cuid())
+  name      String
+  apiKey    String   @unique @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  agents    Agent[]
+  traces    Trace[]
+  alerts    Alert[]
+}
+
+model Agent {
+  id          String   @id @default(cuid())
+  name        String
+  type        String   // orchestrator, worker, tool, router
+  status      String   @default("active") // active, idle, error, stopped
+  description String?
+  metadata    String?  // JSON string
+  projectId   String
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  traces            Trace[]
+  spans             Span[]
+  outgoingConnections AgentConnection[] @relation("SourceAgent")
+  incomingConnections AgentConnection[] @relation("TargetAgent")
+
+  @@index([projectId])
+}
+
+model Trace {
+  id          String   @id @default(cuid())
+  name        String
+  status      String   @default("running") // running, completed, failed, timeout
+  startTime   DateTime @default(now())
+  endTime     DateTime?
+  totalTokens Int      @default(0)
+  totalCost   Float    @default(0)
+  metadata    String?  // JSON string
+  projectId   String
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  agentId     String?
+  agent       Agent?   @relation(fields: [agentId], references: [id])
+  spans       Span[]
+
+  @@index([projectId])
+  @@index([agentId])
+  @@index([startTime])
+  @@index([status])
+}
+
+model Span {
+  id           String   @id @default(cuid())
+  name         String
+  type         String   // llm_call, tool_call, agent_handoff, message, retrieval
+  status       String   @default("running") // running, completed, failed
+  startTime    DateTime @default(now())
+  endTime      DateTime?
+  input        String?  // JSON string
+  output       String?  // JSON string
+  tokens       Int      @default(0)
+  cost         Float    @default(0)
+  model        String?
+  latencyMs    Int?
+  traceId      String
+  trace        Trace    @relation(fields: [traceId], references: [id], onDelete: Cascade)
+  parentSpanId String?
+  parentSpan   Span?    @relation("SpanHierarchy", fields: [parentSpanId], references: [id])
+  childSpans   Span[]   @relation("SpanHierarchy")
+  agentId      String?
+  agent        Agent?   @relation(fields: [agentId], references: [id])
+
+  @@index([traceId])
+  @@index([agentId])
+  @@index([parentSpanId])
+  @@index([type])
+}
+
+model AgentConnection {
+  id            String   @id @default(cuid())
+  sourceAgentId String
+  sourceAgent   Agent    @relation("SourceAgent", fields: [sourceAgentId], references: [id], onDelete: Cascade)
+  targetAgentId String
+  targetAgent   Agent    @relation("TargetAgent", fields: [targetAgentId], references: [id], onDelete: Cascade)
+  messageCount  Int      @default(0)
+  errorCount    Int      @default(0)
+  avgLatencyMs  Float    @default(0)
+  lastMessageAt DateTime @default(now())
+
+  @@unique([sourceAgentId, targetAgentId])
+  @@index([sourceAgentId])
+  @@index([targetAgentId])
+}
+
+model Alert {
+  id        String       @id @default(cuid())
+  name      String
+  type      String       // error_rate, latency, cost, token_usage
+  condition String       // gt, lt, eq
+  threshold Float
+  window    Int          @default(300) // seconds
+  enabled   Boolean      @default(true)
+  projectId String
+  project   Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  createdAt DateTime     @default(now())
+  events    AlertEvent[]
+
+  @@index([projectId])
+}
+
+model AlertEvent {
+  id          String   @id @default(cuid())
+  alertId     String
+  alert       Alert    @relation(fields: [alertId], references: [id], onDelete: Cascade)
+  value       Float
+  message     String
+  status      String   @default("triggered") // triggered, acknowledged, resolved
+  triggeredAt DateTime @default(now())
+  resolvedAt  DateTime?
+
+  @@index([alertId])
+  @@index([triggeredAt])
+}
